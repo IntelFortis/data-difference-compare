@@ -1,6 +1,6 @@
 # Data Diff Compare Studio
 
-一个可直接部署到 **GitHub Pages** 的静态网页工具，用于对比结构相同（字段相同或高度相似）的两份或多份表单数据差异。
+用于对比结构相同（字段相同或高度相似）的两份或多份表单数据差异。
 
 ## 功能
 
@@ -22,16 +22,6 @@
 ## 本地运行
 
 直接双击 `index.html` 即可（或使用任意静态服务器）。
-
-## 部署到 GitHub Pages
-
-1. 新建 GitHub 仓库并把当前目录代码推送上去。
-2. 在仓库设置中打开 `Settings > Pages`。
-3. `Build and deployment` 选择：
-   - `Source`: `Deploy from a branch`
-   - `Branch`: `main`（或你实际分支）/ `/ (root)`
-4. 保存后等待 1-2 分钟，GitHub 会给出访问地址：
-   - `https://<你的用户名>.github.io/<仓库名>/`
 
 ## 使用建议
 
