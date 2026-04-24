@@ -520,6 +520,22 @@ select[multiple] {
   background: #fff;
 }
 
+.parse-issue-wrap {
+  border-color: rgba(255, 59, 48, 0.22);
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.parse-issue-table-wrap {
+  max-height: 320px;
+}
+
+.parse-issue-table th,
+.parse-issue-table td {
+  white-space: normal;
+  word-break: break-word;
+  vertical-align: top;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

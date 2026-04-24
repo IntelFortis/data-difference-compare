@@ -18,6 +18,7 @@ const state = {
   sources: [],
   latestResult: null,
   tinyChartObservers: [],
+  parseIssues: [],
   resultView: {
     mode: "full",
     topN: 80,
@@ -237,38 +238,100 @@ async function parseFiles() {
   setStatus("正在解析文件...");
 
   const parsedSources = [];
+  const parseIssues = [];
   for (const file of files) {
     const lower = file.name.toLowerCase();
-    if (lower.endsWith(".csv")) {
-      const text = await file.text();
-      const wb = XLSX.read(text, { type: "string" });
-      const sheetName = wb.SheetNames[0];
-      const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: null });
-      parsedSources.push(buildSource(file.name, sheetName, rows));
-      continue;
-    }
-    if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
-      const arr = await file.arrayBuffer();
-      const wb = XLSX.read(arr, { type: "array" });
-      wb.SheetNames.forEach((sheetName) => {
+    try {
+      if (lower.endsWith(".csv")) {
+        const text = await file.text();
+        const wb = XLSX.read(text, { type: "string" });
+        const sheetName = wb.SheetNames[0] || "Sheet1";
         const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: null });
-        parsedSources.push(buildSource(file.name, sheetName, rows));
-      });
-      continue;
+        const reason = getSheetInvalidReason(rows);
+        if (reason) {
+          parseIssues.push({ fileName: file.name, sheetName, reason });
+        } else {
+          parsedSources.push(buildSource(file.name, sheetName, rows));
+        }
+        continue;
+      }
+      if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+        const arr = await file.arrayBuffer();
+        const wb = XLSX.read(arr, { type: "array" });
+        wb.SheetNames.forEach((sheetName) => {
+          const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { defval: null });
+          const reason = getSheetInvalidReason(rows);
+          if (reason) {
+            parseIssues.push({ fileName: file.name, sheetName, reason });
+          } else {
+            parsedSources.push(buildSource(file.name, sheetName, rows));
+          }
+        });
+        continue;
+      }
+      parseIssues.push({ fileName: file.name, sheetName: "-", reason: "不支持的文件类型（仅支持 csv/xlsx/xls）" });
+    } catch (err) {
+      parseIssues.push({ fileName: file.name, sheetName: "-", reason: `文件读取失败：${err.message || "未知错误"}` });
     }
-    setStatus(`跳过不支持的文件类型：${file.name}`);
   }
 
-  state.sources = parsedSources.filter((s) => s.fields.length > 0 && s.rows.length > 0);
+  state.sources = parsedSources;
+  state.parseIssues = parseIssues;
   if (!state.sources.length) {
-    renderSourceConfigList();
-    renderSourceConfigPreview();
-    throw new Error("未解析到可用数据（请检查文件是否有表头和数据行）");
+    renderParseFailureDetails(parseIssues);
+    throw new Error(buildParseFailureMessage(parseIssues));
   }
 
   renderSourceConfigList();
   renderSourceConfigPreview();
-  setStatus(`解析完成：共 ${state.sources.length} 个可用 sheet / 数据源`);
+  if (parseIssues.length) {
+    setStatus(`解析完成：可用 ${state.sources.length} 个，跳过 ${parseIssues.length} 个异常 sheet`);
+  } else {
+    setStatus(`解析完成：共 ${state.sources.length} 个可用 sheet / 数据源`);
+  }
+}
+
+function getSheetInvalidReason(rows) {
+  if (!Array.isArray(rows) || !rows.length) return "未读取到数据行（可能只有表头或整表为空）";
+  const fields = Object.keys(rows[0] || {});
+  if (!fields.length) return "未识别到表头字段";
+  return null;
+}
+
+function buildParseFailureMessage(issues) {
+  const intro = "未解析到可用数据。";
+  if (!issues || !issues.length) {
+    return `${intro} 请检查文件是否有表头和数据行。`;
+  }
+  const top = issues.slice(0, 5).map((issue, idx) => `${idx + 1}. ${issue.fileName} / ${issue.sheetName}：${issue.reason}`).join("；");
+  const more = issues.length > 5 ? `；另有 ${issues.length - 5} 项` : "";
+  return `${intro} ${top}${more}`;
+}
+
+function renderParseFailureDetails(issues) {
+  const safeIssues = issues && issues.length ? issues : [{ fileName: "-", sheetName: "-", reason: "未知错误" }];
+  const rows = safeIssues
+    .map(
+      (issue) =>
+        `<tr><td>${escapeHtml(issue.fileName)}</td><td>${escapeHtml(issue.sheetName)}</td><td>${escapeHtml(issue.reason)}</td></tr>`
+    )
+    .join("");
+  const detailHtml = `
+    <div class="source-item parse-issue-wrap">
+      <div class="source-title">
+        <div class="source-name">解析失败明细</div>
+        <span class="tag">${safeIssues.length} 项</span>
+      </div>
+      <div class="table-wrap parse-issue-table-wrap">
+        <table class="parse-issue-table">
+          <thead><tr><th>文件</th><th>Sheet</th><th>原因</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  sourceConfigPreviewEl.innerHTML = detailHtml;
+  sourceConfigListEl.innerHTML = detailHtml;
 }
 
 function buildSource(fileName, sheetName, rows) {
