@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Data Diff Compare Studio</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./style.css?v=20260423-3" />
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+  </head>
+  <body>
+    <main class="app-shell" role="application" aria-label="Data Diff Compare Studio">
+      <header class="topbar">
+        <div class="title-wrap">
+          <p class="eyebrow">Data Difference Compare</p>
+          <h1>Diff Studio</h1>
+        </div>
+        <p id="status" class="status">&#x7b49;&#x5f85;&#x4e0a;&#x4f20;&#x6587;&#x4ef6;</p>
+      </header>
+
+      <section class="dashboard">
+        <article class="card upload-card">
+          <div class="card-head">
+            <h2>&#x4e0a;&#x4f20;</h2>
+            <span class="tag">Step 1</span>
+          </div>
+          <div class="upload-row">
+            <label class="upload-btn" for="fileInput">&#x9009;&#x62e9; CSV / Excel</label>
+            <input id="fileInput" type="file" accept=".csv,.xlsx,.xls" multiple />
+            <button id="parseBtn" class="btn">&#x89e3;&#x6790;</button>
+          </div>
+          <p class="hint">Excel &#x6bcf;&#x4e2a; sheet &#x4f1a;&#x4f5c;&#x4e3a;&#x72ec;&#x7acb;&#x6570;&#x636e;&#x6e90;&#x3002;</p>
+        </article>
+
+        <article class="card config-card">
+          <div class="card-head">
+            <h2>&#x914d;&#x7f6e;</h2>
+            <div class="head-actions">
+              <button id="applyFirstConfigBtn" class="btn subtle">&#x590d;&#x5236;&#x9996;&#x9879;&#x914d;&#x7f6e;</button>
+              <button class="ghost" data-modal-open="configModal">&#x5c55;&#x5f00;</button>
+            </div>
+          </div>
+          <div id="sourceConfigPreview" class="preview-wrap"></div>
+        </article>
+
+        <article class="card chart-card">
+          <div class="card-head">
+            <h2>&#x56fe;&#x8868;</h2>
+            <span class="tag">Step 2</span>
+          </div>
+          <div class="chart-type-grid">
+            <label><input type="checkbox" class="chart-type" value="line" checked /> &#x6298;&#x7ebf;</label>
+            <label><input type="checkbox" class="chart-type" value="bar" checked /> &#x67f1;&#x72b6;</label>
+            <label><input type="checkbox" class="chart-type" value="delta" checked /> &#x5dee;&#x503c;</label>
+            <label><input type="checkbox" class="chart-type" value="pct" /> &#x767e;&#x5206;&#x6bd4;</label>
+            <label><input type="checkbox" class="chart-type" value="table" checked /> &#x8868;&#x683c;</label>
+          </div>
+          <button id="runCompareBtn" class="btn primary">&#x751f;&#x6210;&#x5bf9;&#x6bd4;</button>
+        </article>
+
+        <article class="card result-card">
+          <div class="card-head">
+            <h2>&#x7ed3;&#x679c;</h2>
+            <div class="head-actions">
+              <span id="resultMeta" class="meta-mini"></span>
+              <button class="ghost" data-modal-open="resultModal">&#x5c55;&#x5f00;</button>
+            </div>
+          </div>
+          <div id="chartsPreview" class="preview-wrap compact"></div>
+        </article>
+      </section>
+    </main>
+
+    <div id="configModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-mask" data-modal-close></div>
+      <div class="modal-panel">
+        <div class="modal-head">
+          <h3>&#x5b8c;&#x6574;&#x914d;&#x7f6e;</h3>
+          <button class="ghost" data-modal-close>&#x5173;&#x95ed;</button>
+        </div>
+        <div id="sourceConfigList" class="source-list"></div>
+      </div>
+    </div>
+
+    <div id="resultModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-mask" data-modal-close></div>
+      <div class="modal-panel result-panel-modal">
+        <div class="modal-head">
+          <h3>&#x5b8c;&#x6574;&#x7ed3;&#x679c;</h3>
+          <button class="ghost" data-modal-close>&#x5173;&#x95ed;</button>
+        </div>
+        <div class="result-controls">
+          <label class="result-control-item result-control-mode">
+            &#x7ed3;&#x679c;&#x89c6;&#x56fe;
+            <select id="resultViewMode">
+              <option value="full">&#x5168;&#x91cf;</option>
+              <option value="topn">Top N</option>
+              <option value="window">&#x5206;&#x9875;&#x7a97;&#x53e3;</option>
+            </select>
+          </label>
+          <label class="result-control-item result-control-topn" data-mode-visible="topn">
+            N
+            <input id="resultTopN" type="number" min="10" step="10" value="80" />
+          </label>
+          <label class="result-control-item result-control-window-size" data-mode-visible="window">
+            &#x7a97;&#x53e3;&#x5927;&#x5c0f;
+            <input id="resultWindowSize" type="number" min="20" step="10" value="80" />
+          </label>
+          <label class="result-control-item result-control-window-start" data-mode-visible="window">
+            &#x8d77;&#x59cb;&#x7d22;&#x5f15;
+            <input id="resultWindowStart" type="number" min="0" step="10" value="0" />
+          </label>
+          <button id="applyResultViewBtn" class="result-apply-btn" type="button">&#x5e94;&#x7528;&#x89c6;&#x56fe;</button>
+        </div>
+        <div id="chartsRoot" class="charts-root"></div>
+      </div>
+    </div>
+
+    <script src="./app.js?v=20260423-3"></script>
+  </body>
+</html>
