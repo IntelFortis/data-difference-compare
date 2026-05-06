@@ -8,6 +8,8 @@ const chartsPreview = document.getElementById("chartsPreview");
 const chartsRoot = document.getElementById("chartsRoot");
 const resultMeta = document.getElementById("resultMeta");
 const applyFirstConfigBtn = document.getElementById("applyFirstConfigBtn");
+const clearConfigBtn = document.getElementById("clearConfigBtn");
+const reuploadBtn = document.getElementById("reuploadBtn");
 const resultViewModeEl = document.getElementById("resultViewMode");
 const resultTopNEl = document.getElementById("resultTopN");
 const resultWindowSizeEl = document.getElementById("resultWindowSize");
@@ -19,6 +21,8 @@ const state = {
   latestResult: null,
   tinyChartObservers: [],
   parseIssues: [],
+  statusBubbleEl: null,
+  statusBubbleTimer: null,
   resultView: {
     mode: "full",
     topN: 80,
@@ -34,9 +38,32 @@ bindModalEvents();
 bootstrapEmptyStates();
 initResultViewControls();
 
-parseBtn.addEventListener("click", () => {
-  parseFiles().catch((err) => setStatus(`解析失败：${err.message}`, true));
+parseBtn.addEventListener("click", (evt) => {
+  const anchorEl = evt.currentTarget;
+  parseFiles(anchorEl).catch((err) => setStatus(`解析失败：${err.message}`, true, anchorEl));
 });
+
+if (clearConfigBtn) {
+  clearConfigBtn.addEventListener("click", (evt) => {
+    const anchorEl = evt.currentTarget;
+    if (!state.sources.length) {
+      setStatus("暂无可清空的配置，请先上传并解析文件", true, anchorEl);
+      return;
+    }
+    resetSourceConfigsToDefault();
+    clearRenderedResults();
+    setStatus("已清空当前配置，可重新选择参与对比与字段", false, anchorEl);
+  });
+}
+
+if (reuploadBtn) {
+  reuploadBtn.addEventListener("click", (evt) => {
+    const anchorEl = evt.currentTarget;
+    resetAllStateForReupload();
+    fileInput.click();
+    setStatus("已清空当前数据，请选择新的 CSV / Excel 文件", false, anchorEl);
+  });
+}
 
 fileInput.addEventListener("change", () => {
   const files = Array.from(fileInput.files || []);
@@ -49,33 +76,49 @@ fileInput.addEventListener("change", () => {
   setStatus(`已选择 ${files.length} 个文件：${names}${more}`);
 });
 
-runCompareBtn.addEventListener("click", () => {
+runCompareBtn.addEventListener("click", (evt) => {
+  const anchorEl = evt.currentTarget;
   try {
     const chartTypes = getSelectedChartTypes();
     if (!chartTypes.length) throw new Error("请至少选择一种图表类型");
 
     const selectedSources = state.sources.filter((s) => s.selected);
-    if (selectedSources.length < 2) throw new Error("请至少选择 2 个 sheet / 数据源参与对比");
+    if (selectedSources.length < 1) throw new Error("请至少选择 1 个 sheet / 数据源参与绘图");
+
+    const chartTypeSupport = resolveSupportedChartTypes(chartTypes, selectedSources.length);
+    if (!chartTypeSupport.supported.length) {
+      throw new Error("当前仅选择 1 个数据源，差值图/百分比图需要至少 2 个数据源。请勾选折线、柱状或表格。");
+    }
 
     const normalized = normalizeSources(selectedSources);
     const { mergedRows, dimLabels, metricName } = buildMergedRows(normalized);
-    const payload = { normalized, mergedRows, dimLabels, metricName, chartTypes };
+    const payload = { normalized, mergedRows, dimLabels, metricName, chartTypes: chartTypeSupport.supported };
     state.latestResult = payload;
     state.resultModalFocus = null;
 
     syncResultViewControlsToState();
     renderResults(payload);
     renderResultPreview(payload);
-    setStatus(`生成完成：共 ${chartTypes.length} 类结果`);
+    if (chartTypeSupport.skipped.length) {
+      const skippedLabel = chartTypeSupport.skipped.map((type) => focusTypeLabel(type)).join("、");
+      setStatus(
+        `生成完成：共 ${chartTypeSupport.supported.length} 类结果（已跳过：${skippedLabel}，需至少 2 个数据源）`,
+        false,
+        anchorEl
+      );
+    } else {
+      setStatus(`生成完成：共 ${chartTypeSupport.supported.length} 类结果`, false, anchorEl);
+    }
   } catch (err) {
-    setStatus(err.message, true);
+    setStatus(err.message, true, anchorEl);
   }
 });
 
-applyFirstConfigBtn.addEventListener("click", () => {
+applyFirstConfigBtn.addEventListener("click", (evt) => {
+  const anchorEl = evt.currentTarget;
   const selected = state.sources.filter((s) => s.selected);
   if (!selected.length) {
-    setStatus("没有已选数据源可复制配置", true);
+    setStatus("没有已选数据源可复制配置", true, anchorEl);
     return;
   }
   const base = selected[0].config;
@@ -88,14 +131,15 @@ applyFirstConfigBtn.addEventListener("click", () => {
   });
   renderSourceConfigList();
   renderSourceConfigPreview();
-  setStatus("已将第一个配置应用到其它已选数据源");
+  setStatus("已将第一个配置应用到其它已选数据源", false, anchorEl);
 });
 
 if (applyResultViewBtn) {
-  applyResultViewBtn.addEventListener("click", () => {
+  applyResultViewBtn.addEventListener("click", (evt) => {
+    const anchorEl = evt.currentTarget;
     syncResultViewControlsToState();
     if (!state.latestResult) {
-      setStatus("暂无结果可应用视图，请先生成对比", true);
+      setStatus("暂无结果可应用视图，请先生成对比", true, anchorEl);
       return;
     }
     renderResults(state.latestResult);
@@ -103,7 +147,7 @@ if (applyResultViewBtn) {
     state.resultModalFocus = null;
     renderResultPreview(state.latestResult);
     state.resultModalFocus = prevFocus;
-    setStatus("已应用结果视图设置");
+    setStatus("已应用结果视图设置", false, anchorEl);
   });
 }
 
@@ -115,7 +159,8 @@ if (resultViewModeEl) {
 
 function bootstrapEmptyStates() {
   renderSourceConfigPreview();
-  chartsPreview.innerHTML = '<p class="mini-empty">暂无结果，生成对比后会显示多缩略卡片。</p>';
+  renderEmptyResultPreview();
+  resultMeta.textContent = "";
 }
 
 function bindModalEvents() {
@@ -220,22 +265,90 @@ function toggleResultViewParams(mode) {
   });
 }
 
-function setStatus(msg, isError = false) {
+function setStatus(msg, isError = false, anchorEl = null) {
   statusEl.textContent = msg;
   statusEl.classList.toggle("error", isError);
+  if (anchorEl) {
+    showStatusBubble(msg, isError, anchorEl);
+  }
+}
+
+function showStatusBubble(msg, isError, anchorEl) {
+  if (!anchorEl || typeof anchorEl.getBoundingClientRect !== "function") return;
+  if (state.statusBubbleTimer) {
+    clearTimeout(state.statusBubbleTimer);
+    state.statusBubbleTimer = null;
+  }
+  if (state.statusBubbleEl) {
+    state.statusBubbleEl.remove();
+    state.statusBubbleEl = null;
+  }
+
+  const bubble = document.createElement("div");
+  bubble.className = `status-bubble${isError ? " error" : ""}`;
+  bubble.textContent = msg;
+  document.body.appendChild(bubble);
+
+  const rect = anchorEl.getBoundingClientRect();
+  const bubbleRect = bubble.getBoundingClientRect();
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const margin = 10;
+
+  let left = rect.left + rect.width / 2 - bubbleRect.width / 2;
+  left = Math.max(margin, Math.min(left, viewportWidth - bubbleRect.width - margin));
+
+  let top = rect.top - bubbleRect.height - 10;
+  const canShowAbove = top >= margin;
+  if (!canShowAbove) {
+    top = rect.bottom + 10;
+    top = Math.min(top, viewportHeight - bubbleRect.height - margin);
+  }
+
+  bubble.style.left = `${Math.round(left)}px`;
+  bubble.style.top = `${Math.round(top)}px`;
+
+  state.statusBubbleEl = bubble;
+  state.statusBubbleTimer = setTimeout(() => {
+    bubble.classList.add("status-bubble-hide");
+    setTimeout(() => {
+      if (state.statusBubbleEl === bubble) {
+        state.statusBubbleEl = null;
+      }
+      bubble.remove();
+    }, 220);
+    state.statusBubbleTimer = null;
+  }, 1500);
 }
 
 function getSelectedChartTypes() {
   return Array.from(document.querySelectorAll(".chart-type:checked")).map((el) => el.value);
 }
 
-async function parseFiles() {
+function resolveSupportedChartTypes(chartTypes, sourceCount) {
+  const requiresMultiSource = new Set(["delta", "pct"]);
+  const supported = [];
+  const skipped = [];
+
+  chartTypes.forEach((type) => {
+    if (requiresMultiSource.has(type) && sourceCount < 2) {
+      skipped.push(type);
+    } else {
+      supported.push(type);
+    }
+  });
+
+  return { supported, skipped };
+}
+
+async function parseFiles(statusAnchorEl = null) {
   const files = Array.from(fileInput.files || []);
   if (!files.length) {
-    setStatus("请先选择至少一个文件", true);
+    setStatus("请先选择至少一个文件", true, statusAnchorEl);
     return;
   }
-  setStatus("正在解析文件...");
+  clearRenderedResults();
+  setStatus("正在解析文件...", false, statusAnchorEl);
 
   const parsedSources = [];
   const parseIssues = [];
@@ -285,10 +398,60 @@ async function parseFiles() {
   renderSourceConfigList();
   renderSourceConfigPreview();
   if (parseIssues.length) {
-    setStatus(`解析完成：可用 ${state.sources.length} 个，跳过 ${parseIssues.length} 个异常 sheet`);
+    setStatus(`解析完成：可用 ${state.sources.length} 个，跳过 ${parseIssues.length} 个异常 sheet`, false, statusAnchorEl);
   } else {
-    setStatus(`解析完成：共 ${state.sources.length} 个可用 sheet / 数据源`);
+    setStatus(`解析完成：共 ${state.sources.length} 个可用 sheet / 数据源`, false, statusAnchorEl);
   }
+}
+
+function resetSourceConfigsToDefault() {
+  state.sources.forEach((src) => {
+    const dimDefault = inferDimensionField(src.fields);
+    const metricDefault = inferMetricField(src.rows, src.fields, dimDefault);
+    src.selected = false;
+    src.config.dimensions = dimDefault ? [dimDefault] : [];
+    src.config.metric = metricDefault || "";
+    src.config.agg = "sum";
+    src.config.filter = "";
+  });
+  renderSourceConfigList();
+  renderSourceConfigPreview();
+}
+
+function resetAllStateForReupload() {
+  closeAllModals();
+  cleanupTinyPreviewArtifacts();
+  if (state.statusBubbleTimer) {
+    clearTimeout(state.statusBubbleTimer);
+    state.statusBubbleTimer = null;
+  }
+  if (state.statusBubbleEl) {
+    state.statusBubbleEl.remove();
+    state.statusBubbleEl = null;
+  }
+  state.sources = [];
+  state.parseIssues = [];
+  state.latestResult = null;
+  state.resultModalFocus = null;
+  fileInput.value = "";
+  chartsRoot.innerHTML = "";
+  resultMeta.textContent = "";
+  renderSourceConfigList();
+  renderSourceConfigPreview();
+  renderEmptyResultPreview();
+}
+
+function clearRenderedResults() {
+  cleanupTinyPreviewArtifacts();
+  state.latestResult = null;
+  state.resultModalFocus = null;
+  chartsRoot.innerHTML = "";
+  resultMeta.textContent = "";
+  renderEmptyResultPreview();
+}
+
+function renderEmptyResultPreview() {
+  chartsPreview.innerHTML = '<p class="mini-empty">暂无结果，生成对比后会显示多缩略卡片。</p>';
 }
 
 function getSheetInvalidReason(rows) {
@@ -626,7 +789,7 @@ function renderResults(payload) {
     );
   }
 
-  if (focusedTypes.includes("delta") || focusedTypes.includes("pct")) {
+  if (normalized.length > 1 && (focusedTypes.includes("delta") || focusedTypes.includes("pct"))) {
     const deltaRows = buildDeltaRows(normalized, viewDims);
     if (focusedTypes.includes("delta")) {
       const plotDiv = createChartCard(chartsRoot, `与基准差值图（基准：${baseName}）`, "delta_chart");
@@ -711,7 +874,7 @@ function renderResultPreview(payload) {
     const host = createPreviewTile(grid, "柱状图", "聚合值对比", "bar");
     renderTinyChart(host, buildSeriesTrace(normalized, viewDims, viewRows, "bar"), metricName);
   }
-  if (focusedTypes.includes("delta") || focusedTypes.includes("pct")) {
+  if (normalized.length > 1 && (focusedTypes.includes("delta") || focusedTypes.includes("pct"))) {
     const deltaRows = buildDeltaRows(normalized, viewDims);
     if (focusedTypes.includes("delta")) {
       const host = createPreviewTile(grid, "差值图", "与基准差值", "delta");
@@ -872,7 +1035,7 @@ function createChartCard(container, title, exportName = "chart") {
 
   downloadBtn.addEventListener("click", () => {
     downloadPlotAsPngWithWhiteBackground(plot, buildExportFileName(exportName)).catch(() => {
-      setStatus("下载失败，请重试", true);
+      setStatus("下载失败，请重试", true, downloadBtn);
     });
   });
 

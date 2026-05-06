@@ -105,6 +105,53 @@ body {
   border-color: rgba(255, 59, 48, 0.28);
 }
 
+.status-bubble {
+  position: fixed;
+  z-index: 80;
+  max-width: min(70vw, 420px);
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 122, 255, 0.32);
+  background: rgba(18, 42, 78, 0.95);
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.35;
+  box-shadow: 0 10px 24px rgba(10, 19, 35, 0.28);
+  pointer-events: none;
+  animation: statusBubbleIn 180ms ease-out;
+}
+
+.status-bubble.error {
+  border-color: rgba(255, 59, 48, 0.4);
+  background: rgba(122, 24, 30, 0.96);
+}
+
+.status-bubble.status-bubble-hide {
+  animation: statusBubbleOut 180ms ease-in forwards;
+}
+
+@keyframes statusBubbleIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes statusBubbleOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+}
+
 .dashboard {
   flex: 1;
   min-height: 0;
@@ -182,6 +229,10 @@ body {
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.upload-row .ghost {
+  background: rgba(255, 255, 255, 0.95);
 }
 
 #fileInput {
